@@ -2,6 +2,20 @@
 
 A lightweight Google Gemini API-compatible proxy server that allows you to call OpenAI-compatible LLM services using the Gemini API format.
 
+## 🔥 Quick Setup for Gemini CLI
+
+Currently, Gemini CLI cannot easily use models other than Gemini. This Python tool was developed to meet this need.
+
+**Usage Steps:**
+1. Modify `config.json` and fill in your Kimi API key
+2. Install dependencies and run `python gemini_proxy.py`
+3. Set environment variables:
+   ```bash
+   export GOOGLE_GEMINI_BASE_URL=http://localhost:8000/
+   export GEMINI_API_KEY=sk-1234
+   ```
+4. In Gemini CLI, use `/auth` and select "Use Gemini API Key"
+
 > **⚠️ Important Note: The current version has only been fully tested and optimized on Moonshot Kimi. Other OpenAI-compatible services require your own testing and adjustments.**
 
 [中文文档](README_ZH.md) | [Chinese Documentation](README_ZH.md)
