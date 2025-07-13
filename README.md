@@ -8,7 +8,7 @@ Currently, Gemini CLI cannot easily use models other than Gemini. This Python to
 
 **Usage Steps:**
 1. Modify `config.json` and fill in your Kimi API key
-2. Install dependencies and run `python gemini_proxy.py`
+2. Install dependencies and run `python gemini_proxy_for_kimi.py`
 3. Set environment variables:
    ```bash
    export GOOGLE_GEMINI_BASE_URL=http://localhost:8000/

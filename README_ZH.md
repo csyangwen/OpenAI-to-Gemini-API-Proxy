@@ -7,7 +7,7 @@
 
 **使用方法：**
 1. 修改 `config.json` 填入 Kimi API key
-2. 安装依赖，运行 `python gemini_proxy.py`
+2. 安装依赖，运行 `python gemini_proxy_for_kimi.py`
 3. 设置环境变量：
    ```bash
    export GOOGLE_GEMINI_BASE_URL=http://localhost:8000/
