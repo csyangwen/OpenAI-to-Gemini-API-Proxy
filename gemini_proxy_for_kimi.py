@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
 轻量级 Gemini API 兼容代理服务器
-接收 Gemini 格式请求，转发给 OpenAI 或其他 LLM，返回 Gemini 格式响应
-
-基于 LiteLLM 核心转换逻辑的简化实现
+接收 Gemini 格式请求，转发给 OpenAI 或其他 OPNAI标准API的LLM，返回 Gemini 格式响应
 """
 
 import json
