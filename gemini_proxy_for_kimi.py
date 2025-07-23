@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 import uvicorn
+from tenacity import retry, wait_fixed, stop_after_attempt, retry_if_exception_type
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -109,17 +110,30 @@ def init_logging_system(config):
     else:
         logger.info("访问日志已禁用")
 
-# 加载配置
-config = load_config()
+# 全局配置变量（稍后会动态设置）
+OPENAI_API_KEY = None
+OPENAI_BASE_URL = None
+MODEL_MAPPING = {}
+DEFAULT_OPENAI_MODEL = None
+MAX_RETRIES = 3
+WAIT_SECONDS = 2
 
-# 初始化日志系统
-init_logging_system(config)
+def update_global_config(provider_config, retry_config):
+    """根据所选提供商更新全局配置"""
+    global OPENAI_API_KEY, OPENAI_BASE_URL, MODEL_MAPPING, DEFAULT_OPENAI_MODEL, MAX_RETRIES, WAIT_SECONDS
 
-# 全局配置变量
-OPENAI_API_KEY = config.get("openai_api_key")
-OPENAI_BASE_URL = config.get("openai_base_url", "https://api.openai.com/v1")
-MODEL_MAPPING = config.get("model_mapping", {})
-DEFAULT_OPENAI_MODEL = config.get("default_openai_model", "gpt-3.5-turbo")
+    OPENAI_API_KEY = provider_config.get("openai_api_key")
+    OPENAI_BASE_URL = provider_config.get("openai_base_url", "https://api.openai.com/v1")
+    MODEL_MAPPING = provider_config.get("model_mapping", {})
+    DEFAULT_OPENAI_MODEL = provider_config.get("default_openai_model", "gpt-3.5-turbo")
+
+    MAX_RETRIES = retry_config.get("max_retries", 3)
+    WAIT_SECONDS = retry_config.get("wait_fixed", 2)
+
+    # 重新配置 Tenacity 重试装饰器
+    # 注意：这需要在服务启动前完成，因为装饰器在函数定义时就已经创建
+    # 因此，我们将重试逻辑的参数直接传递给 _retryable_create
+    pass
 
 
 def log_request_response(request_id: str, phase: str, data: Any, extra_info: str = "", endpoint: str = ""):
@@ -517,6 +531,21 @@ class GeminiProxyService:
         )
         self.converter_to_openai = GeminiToOpenAIConverter()
         self.converter_to_gemini = OpenAIToGeminiConverter()
+
+    async def _retryable_create(self, **kwargs):
+        """可重试的创建请求"""
+
+        # 使用动态重试参数
+        @retry(
+            wait=wait_fixed(WAIT_SECONDS),
+            stop=stop_after_attempt(MAX_RETRIES),
+            retry=retry_if_exception_type(Exception),
+            reraise=True
+        )
+        async def _create_with_retry():
+            return await self.client.chat.completions.create(**kwargs)
+
+        return await _create_with_retry()
     
     def map_gemini_model_to_openai(self, gemini_model: str) -> str:
         """将 Gemini 模型名称映射到 OpenAI 模型名称"""
@@ -589,7 +618,7 @@ class GeminiProxyService:
             )
             
             # 调用 OpenAI API
-            response = await self.client.chat.completions.create(**completion_params)
+            response = await self._retryable_create(**completion_params)
             
             # 记录 OpenAI 原始响应
             log_request_response(
@@ -692,7 +721,7 @@ class GeminiProxyService:
             )
             
             # 调用 OpenAI 流式 API
-            stream = await self.client.chat.completions.create(**completion_params)
+            stream = await self._retryable_create(**completion_params)
             
             # 累积工具调用状态和响应内容
             accumulated_tool_calls = {}
@@ -808,11 +837,15 @@ class GeminiProxyService:
 # 创建 FastAPI 应用
 app = FastAPI(title="Gemini API Proxy", version="1.0.0")
 
-# 初始化代理服务
-proxy_service = GeminiProxyService(
-    openai_api_key=OPENAI_API_KEY,
-    openai_base_url=OPENAI_BASE_URL
-)
+# 初始化代理服务（稍后会重新配置）
+proxy_service = None
+
+
+async def get_proxy_service() -> GeminiProxyService:
+    """依赖注入，确保服务已初始化"""
+    if proxy_service is None:
+        raise HTTPException(status_code=503, detail="服务尚未初始化，请稍后重试")
+    return proxy_service
 
 
 async def _generate_content_internal(model_name: str, request: Request, log_suffix: str = ""):
@@ -821,6 +854,7 @@ async def _generate_content_internal(model_name: str, request: Request, log_suff
     request_id = str(uuid.uuid4())
     
     try:
+        proxy_service = await get_proxy_service()
         request_data = await request.json()
         
         # 获取请求的端点路径
@@ -877,6 +911,7 @@ async def stream_generate_content(model_name: str, request: Request):
     request_id = str(uuid.uuid4())
     
     try:
+        proxy_service = await get_proxy_service()
         request_data = await request.json()
         
         # 获取请求的端点路径
@@ -942,31 +977,63 @@ async def health_check(request: Request):
 
 
 if __name__ == "__main__":
-    # 从配置文件加载配置
-    runtime_config = load_config()
+    # 加载完整配置
+    config = load_config()
     
-    # 重新初始化日志系统（支持运行时配置）
-    init_logging_system(runtime_config)
+    # 初始化日志系统
+    init_logging_system(config)
     
-    api_key = runtime_config.get("openai_api_key")
-    base_url = runtime_config.get("openai_base_url")
-    server_config = runtime_config.get("server", {})
-    logging_config = runtime_config.get("logging", {})
+    # 获取提供商列表
+    providers = config.get("providers", [])
+    if not providers:
+        logger.error("配置文件中未找到任何提供商 (providers)")
+        exit(1)
+
+    # 让用户选择提供商
+    print("请选择要使用的 API 提供商:")
+    for i, provider in enumerate(providers):
+        print(f"  {i + 1}: {provider.get('name', f'未命名提供商 {i+1}')}")
+    
+    choice = -1
+    while choice < 1 or choice > len(providers):
+        try:
+            raw_choice = input(f"请输入选项 (1-{len(providers)}): ")
+            choice = int(raw_choice)
+            if not (1 <= choice <= len(providers)):
+                print("无效选项，请重新输入。")
+        except ValueError:
+            print("无效输入，请输入数字。")
+
+    # 获取所选提供商的配置
+    selected_provider = providers[choice - 1]
+
+    # 获取通用配置
+    server_config = config.get("server", {})
+    logging_config = config.get("logging", {})
+    retry_config = config.get("retry", {})
+    
+    # 更新全局配置
+    update_global_config(selected_provider, retry_config)
+
+    # 初始化代理服务
+    proxy_service = GeminiProxyService(
+        openai_api_key=OPENAI_API_KEY,
+        openai_base_url=OPENAI_BASE_URL
+    )
     
     # 获取服务器配置
     host = server_config.get("host", "0.0.0.0")
     port = server_config.get("port", 8000)
     log_level = server_config.get("log_level", "info")
-    
-    # 更新全局配置
-    proxy_service = GeminiProxyService(
-        openai_api_key=api_key,
-        openai_base_url=base_url
-    )
-    
-    logger.info(f"使用配置 - API Key: {api_key[:10] if api_key else 'None'}..., Base URL: {base_url}")
-    logger.info(f"服务器配置 - Host: {host}, Port: {port}, Log Level: {log_level}")
-    logger.info(f"日志配置 - 详细日志: {logging_config.get('enable_detailed_logs', False)}, 访问日志: {logging_config.get('enable_access_logs', True)}")
+
+    logger.info("="*50)
+    logger.info(f"✅ 已选择提供商: {selected_provider.get('name')}")
+    logger.info(f"   - API Key: {OPENAI_API_KEY[:10] if OPENAI_API_KEY else 'None'}...")
+    logger.info(f"   - Base URL: {OPENAI_BASE_URL}")
+    logger.info(f"🔄 重试配置: 最大 {MAX_RETRIES} 次, 间隔 {WAIT_SECONDS} 秒")
+    logger.info(f"🖥️ 服务器配置: Host={host}, Port={port}, Log Level={log_level}")
+    logger.info(f"📝 日志配置: 详细日志={logging_config.get('enable_detailed_logs', False)}, 访问日志={logging_config.get('enable_access_logs', True)}")
+    logger.info("="*50)
     
     # 启动服务器
     uvicorn.run(

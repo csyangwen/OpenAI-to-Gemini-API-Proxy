@@ -1,19 +1,38 @@
 {
-  "openai_api_key": "sk-1234",
-  "openai_base_url": "https://api.moonshot.cn/v1",
-  "model_mapping": {
-    "gemini-2.5-pro": "kimi-k2-0711-preview",
-    "gemini-2.5-flash": "moonshot-v1-auto"
-  },
-  "default_openai_model": "kimi-k2-0711-preview",
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "log_level": "info"
-  },
-  "logging": {
-    "enable_detailed_logs": false,
-    "enable_access_logs": true,
-    "log_directory": "logs"
-  }
+    "providers": [
+        {
+            "name": "Moonshot",
+            "openai_api_key": "sk-1234",
+            "openai_base_url": "https://api.moonshot.cn/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "kimi-k2-0711-preview",
+                "gemini-2.5-flash": "moonshot-v1-auto"
+            },
+            "default_openai_model": "kimi-k2-0711-preview"
+        },
+        {
+            "name": "OpenAI",
+            "openai_api_key": "sk-5678",
+            "openai_base_url": "https://api.openai.com/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "gpt-4o",
+                "gemini-2.5-flash": "gpt-4o-mini"
+            },
+            "default_openai_model": "gpt-4o-mini"
+        }
+    ],
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "log_level": "info"
+    },
+    "logging": {
+        "enable_detailed_logs": false,
+        "enable_access_logs": true,
+        "log_directory": "logs"
+    },
+    "retry": {
+        "max_retries": 999,
+        "wait_fixed": 5
+    }
 }

@@ -7,14 +7,15 @@ A lightweight Google Gemini API-compatible proxy server that allows you to call 
 Currently, Gemini CLI cannot easily use models other than Gemini. This Python tool was developed to meet this need.
 
 **Usage Steps:**
-1. Modify `config.json` and fill in your Kimi API key
-2. Install dependencies and run `python gemini_proxy_for_kimi.py`
-3. Set environment variables:
+1. Modify `config.json` to add your API provider configurations.
+2. Install dependencies and run `python gemini_proxy_for_kimi.py`.
+3. When prompted, select the API provider you want to use.
+4. Set environment variables:
    ```bash
    export GOOGLE_GEMINI_BASE_URL=http://localhost:8000/
    export GEMINI_API_KEY=sk-1234
    ```
-4. In Gemini CLI, use `/auth` and select "Use Gemini API Key"
+5. In Gemini CLI, use `/auth` and select "Use Gemini API Key".
 
 > **⚠️ Important Note: The current version has only been fully tested and optimized on Moonshot Kimi. Other OpenAI-compatible services require your own testing and adjustments.**
 
@@ -30,6 +31,7 @@ Currently, Gemini CLI cannot easily use models other than Gemini. This Python to
 - 📊 **Model Mapping** - Flexible model name mapping configuration
 - 📝 **Detailed Logging** - Configurable access logs and detailed request logs
 - ⚙️ **Configuration Files** - Unified management through JSON configuration files
+- 🔁 **Automatic Retries** - Automatically retries requests on failure
 
 ## 🚀 Quick Start
 
@@ -41,36 +43,57 @@ Currently, Gemini CLI cannot easily use models other than Gemini. This Python to
 ### 2. Install Dependencies
 
 ```bash
-pip install fastapi uvicorn openai
+pip install -r requirements.txt
 ```
 
 ### 3. Configuration File
 
-Create a `config.json` file:
+Create a `config.json` file, which now supports multiple providers:
 
 ```json
 {
-  "openai_api_key": "sk-your-kimi-api-key",
-  "openai_base_url": "https://api.moonshot.cn/v1",
-  "model_mapping": {
-    "gemini-2.5-pro": "kimi-k2-0711-preview",
-    "gemini-2.5-flash": "moonshot-v1-auto",
-  },
-  "default_openai_model": "kimi-k2-0711-preview",
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "log_level": "info"
-  },
-  "logging": {
-    "enable_detailed_logs": true,
-    "enable_access_logs": true,
-    "log_directory": "logs"
-  }
+    "providers": [
+        {
+            "name": "Moonshot",
+            "openai_api_key": "sk-1234",
+            "openai_base_url": "https://api.moonshot.cn/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "kimi-k2-0711-preview",
+                "gemini-2.5-flash": "moonshot-v1-auto"
+            },
+            "default_openai_model": "kimi-k2-0711-preview"
+        },
+        {
+            "name": "OpenAI",
+            "openai_api_key": "sk-5678",
+            "openai_base_url": "https://api.openai.com/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "gpt-4o",
+                "gemini-2.5-flash": "gpt-4o-mini"
+            },
+            "default_openai_model": "gpt-4o-mini"
+        }
+    ],
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "log_level": "info"
+    },
+    "logging": {
+        "enable_detailed_logs": false,
+        "enable_access_logs": true,
+        "log_directory": "logs"
+    },
+    "retry": {
+        "max_retries": 999,
+        "wait_fixed": 5
+    }
 }
 ```
 
 ### 4. Start the Service
+
+When you start the service, you will be prompted to select a provider:
 
 ```bash
 python gemini_proxy_for_kimi.py
@@ -152,23 +175,32 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 
 ```json
 {
-  "openai_api_key": "sk-your-kimi-api-key",
-  "openai_base_url": "https://api.moonshot.cn/v1",
-  "model_mapping": {
-    "gemini-2.5-pro": "kimi-k2-0711-preview",
-    "gemini-2.5-flash": "moonshot-v1-auto",
-  },
-  "default_openai_model": "kimi-k2-0711-preview",
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "log_level": "info"
-  },
-  "logging": {
-    "enable_detailed_logs": false,
-    "enable_access_logs": true,
-    "log_directory": "logs"
-  }
+    "providers": [
+        {
+            "name": "Moonshot",
+            "openai_api_key": "sk-1234",
+            "openai_base_url": "https://api.moonshot.cn/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "kimi-k2-0711-preview",
+                "gemini-2.5-flash": "moonshot-v1-auto"
+            },
+            "default_openai_model": "kimi-k2-0711-preview"
+        }
+    ],
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "log_level": "info"
+    },
+    "logging": {
+        "enable_detailed_logs": false,
+        "enable_access_logs": true,
+        "log_directory": "logs"
+    },
+    "retry": {
+        "max_retries": 999,
+        "wait_fixed": 5
+    }
 }
 ```
 
@@ -176,16 +208,20 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `openai_api_key` | OpenAI API key | Required |
-| `openai_base_url` | OpenAI API base URL | `https://api.openai.com/v1` |
-| `model_mapping` | Gemini to OpenAI model mapping | `{}` |
-| `default_openai_model` | Default OpenAI model | `gpt-3.5-turbo` |
+| `providers` | A list of API provider configurations. | `[]` |
+| `providers[].name` | The name of the provider, for selection at startup. | `Unnamed Provider` |
+| `providers[].openai_api_key` | OpenAI API key for the provider. | Required |
+| `providers[].openai_base_url` | OpenAI API base URL for the provider. | `https://api.openai.com/v1` |
+| `providers[].model_mapping` | Gemini to OpenAI model mapping for the provider. | `{}` |
+| `providers[].default_openai_model` | Default OpenAI model for the provider. | `gpt-3.5-turbo` |
 | `server.host` | Listen address | `0.0.0.0` |
 | `server.port` | Listen port | `8000` |
 | `server.log_level` | Log level | `info` |
 | `logging.enable_detailed_logs` | Enable detailed request logs | `false` |
 | `logging.enable_access_logs` | Enable access logs | `true` |
 | `logging.log_directory` | Log directory | `logs` |
+| `retry.max_retries` | Maximum number of retries on failure | `3` |
+| `retry.wait_fixed` | Fixed wait time between retries in seconds | `2` |
 
 ## 📊 Supported LLM Services
 
