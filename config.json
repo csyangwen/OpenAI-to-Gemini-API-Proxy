@@ -18,7 +18,6 @@
     },
     "retry": {
         "max_retries": 3,
-        "wait_fixed": 2,
-        "stop_max_attempt_number": 3
+        "wait_fixed": 2
     }
 }
