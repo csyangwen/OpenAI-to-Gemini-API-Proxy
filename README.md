@@ -30,6 +30,7 @@ Currently, Gemini CLI cannot easily use models other than Gemini. This Python to
 - 📊 **Model Mapping** - Flexible model name mapping configuration
 - 📝 **Detailed Logging** - Configurable access logs and detailed request logs
 - ⚙️ **Configuration Files** - Unified management through JSON configuration files
+- 🔁 **Automatic Retries** - Automatically retries requests on failure
 
 ## 🚀 Quick Start
 
@@ -41,7 +42,7 @@ Currently, Gemini CLI cannot easily use models other than Gemini. This Python to
 ### 2. Install Dependencies
 
 ```bash
-pip install fastapi uvicorn openai
+pip install -r requirements.txt
 ```
 
 ### 3. Configuration File
@@ -168,6 +169,10 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
     "enable_detailed_logs": false,
     "enable_access_logs": true,
     "log_directory": "logs"
+  },
+  "retry": {
+    "max_retries": 3,
+    "wait_fixed": 2
   }
 }
 ```
@@ -186,6 +191,8 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 | `logging.enable_detailed_logs` | Enable detailed request logs | `false` |
 | `logging.enable_access_logs` | Enable access logs | `true` |
 | `logging.log_directory` | Log directory | `logs` |
+| `retry.max_retries` | Maximum number of retries on failure | `3` |
+| `retry.wait_fixed` | Fixed wait time between retries in seconds | `2` |
 
 ## 📊 Supported LLM Services
 

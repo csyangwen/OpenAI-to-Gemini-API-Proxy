@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 import uvicorn
+from tenacity import retry, wait_fixed, stop_after_attempt, retry_if_exception_type
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -120,6 +121,9 @@ OPENAI_API_KEY = config.get("openai_api_key")
 OPENAI_BASE_URL = config.get("openai_base_url", "https://api.openai.com/v1")
 MODEL_MAPPING = config.get("model_mapping", {})
 DEFAULT_OPENAI_MODEL = config.get("default_openai_model", "gpt-3.5-turbo")
+RETRY_CONFIG = config.get("retry", {})
+MAX_RETRIES = RETRY_CONFIG.get("max_retries", 3)
+WAIT_SECONDS = RETRY_CONFIG.get("wait_fixed", 2)
 
 
 def log_request_response(request_id: str, phase: str, data: Any, extra_info: str = "", endpoint: str = ""):
@@ -517,6 +521,16 @@ class GeminiProxyService:
         )
         self.converter_to_openai = GeminiToOpenAIConverter()
         self.converter_to_gemini = OpenAIToGeminiConverter()
+
+    @retry(
+        wait=wait_fixed(WAIT_SECONDS),
+        stop=stop_after_attempt(MAX_RETRIES),
+        retry=retry_if_exception_type(Exception),
+        reraise=True
+    )
+    async def _retryable_create(self, **kwargs):
+        """可重试的创建请求"""
+        return await self.client.chat.completions.create(**kwargs)
     
     def map_gemini_model_to_openai(self, gemini_model: str) -> str:
         """将 Gemini 模型名称映射到 OpenAI 模型名称"""
@@ -589,7 +603,7 @@ class GeminiProxyService:
             )
             
             # 调用 OpenAI API
-            response = await self.client.chat.completions.create(**completion_params)
+            response = await self._retryable_create(**completion_params)
             
             # 记录 OpenAI 原始响应
             log_request_response(
@@ -692,7 +706,7 @@ class GeminiProxyService:
             )
             
             # 调用 OpenAI 流式 API
-            stream = await self.client.chat.completions.create(**completion_params)
+            stream = await self._retryable_create(**completion_params)
             
             # 累积工具调用状态和响应内容
             accumulated_tool_calls = {}

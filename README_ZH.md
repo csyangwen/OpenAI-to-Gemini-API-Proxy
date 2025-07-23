@@ -29,6 +29,7 @@
 - 📊 **模型映射** - 灵活的模型名称映射配置
 - 📝 **详细日志** - 可配置的访问日志和详细请求日志
 - ⚙️ **配置文件** - JSON 配置文件统一管理
+- 🔁 **自动重试** - 请求失败时自动重试
 
 ## 🚀 快速开始
 
@@ -40,7 +41,7 @@
 ### 2. 安装依赖
 
 ```bash
-pip install fastapi uvicorn openai
+pip install -r requirements.txt
 ```
 
 ### 3. 配置文件
@@ -167,6 +168,10 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
     "enable_detailed_logs": false,
     "enable_access_logs": true,
     "log_directory": "logs"
+  },
+  "retry": {
+    "max_retries": 3,
+    "wait_fixed": 2
   }
 }
 ```
@@ -185,6 +190,8 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 | `logging.enable_detailed_logs` | 启用详细请求日志 | `false` |
 | `logging.enable_access_logs` | 启用访问日志 | `true` |
 | `logging.log_directory` | 日志目录 | `logs` |
+| `retry.max_retries` | 失败时最大重试次数 | `3` |
+| `retry.wait_fixed` | 每次重试之间的固定等待时间（秒） | `2` |
 
 ## 📊 支持的 LLM 服务
 
