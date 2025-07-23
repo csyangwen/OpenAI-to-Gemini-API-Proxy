@@ -6,14 +6,15 @@
 当前Gemini CLI不能简单的使用gemini之外的模型，所以基于此需求开发了一个python工具。
 
 **使用方法：**
-1. 修改 `config.json` 填入 Kimi API key
-2. 安装依赖，运行 `python gemini_proxy_for_kimi.py`
-3. 设置环境变量：
+1. 修改 `config.json`，添加您的 API 提供商配置。
+2. 安装依赖，运行 `python gemini_proxy_for_kimi.py`。
+3. 在程序启动时，根据提示选择要使用的 API 提供商。
+4. 设置环境变量：
    ```bash
    export GOOGLE_GEMINI_BASE_URL=http://localhost:8000/
    export GEMINI_API_KEY=sk-1234
    ```
-4. 在 Gemini CLI 中使用 `/auth`，选择 "Use Gemini API Key"
+5. 在 Gemini CLI 中使用 `/auth`，选择 "Use Gemini API Key"。
 
 > **⚠️ 重要说明：当前版本仅在 Moonshot Kimi 上进行过完整测试和优化。其他 OpenAI 兼容服务需要您自行测试和调整。**
 
@@ -46,31 +47,52 @@ pip install -r requirements.txt
 
 ### 3. 配置文件
 
-创建 `config.json` 文件：
+创建 `config.json` 文件，现在支持多个提供商：
 
 ```json
 {
-  "openai_api_key": "sk-your-kimi-api-key",
-  "openai_base_url": "https://api.moonshot.cn/v1",
-  "model_mapping": {
-    "gemini-2.5-pro": "kimi-k2-0711-preview",
-    "gemini-2.5-flash": "moonshot-v1-auto",
-  },
-  "default_openai_model": "kimi-k2-0711-preview",
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "log_level": "info"
-  },
-  "logging": {
-    "enable_detailed_logs": true,
-    "enable_access_logs": true,
-    "log_directory": "logs"
-  }
+    "providers": [
+        {
+            "name": "Moonshot",
+            "openai_api_key": "sk-1234",
+            "openai_base_url": "https://api.moonshot.cn/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "kimi-k2-0711-preview",
+                "gemini-2.5-flash": "moonshot-v1-auto"
+            },
+            "default_openai_model": "kimi-k2-0711-preview"
+        },
+        {
+            "name": "OpenAI",
+            "openai_api_key": "sk-5678",
+            "openai_base_url": "https://api.openai.com/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "gpt-4o",
+                "gemini-2.5-flash": "gpt-4o-mini"
+            },
+            "default_openai_model": "gpt-4o-mini"
+        }
+    ],
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "log_level": "info"
+    },
+    "logging": {
+        "enable_detailed_logs": false,
+        "enable_access_logs": true,
+        "log_directory": "logs"
+    },
+    "retry": {
+        "max_retries": 999,
+        "wait_fixed": 5
+    }
 }
 ```
 
 ### 4. 启动服务
+
+启动服务时，系统会提示您选择一个提供商：
 
 ```bash
 python gemini_proxy_for_kimi.py
@@ -152,27 +174,32 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 
 ```json
 {
-  "openai_api_key": "sk-your-kimi-api-key",
-  "openai_base_url": "https://api.moonshot.cn/v1",
-  "model_mapping": {
-    "gemini-2.5-pro": "kimi-k2-0711-preview",
-    "gemini-2.5-flash": "moonshot-v1-auto",
-  },
-  "default_openai_model": "kimi-k2-0711-preview",
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "log_level": "info"
-  },
-  "logging": {
-    "enable_detailed_logs": false,
-    "enable_access_logs": true,
-    "log_directory": "logs"
-  },
-  "retry": {
-    "max_retries": 3,
-    "wait_fixed": 2
-  }
+    "providers": [
+        {
+            "name": "Moonshot",
+            "openai_api_key": "sk-1234",
+            "openai_base_url": "https://api.moonshot.cn/v1",
+            "model_mapping": {
+                "gemini-2.5-pro": "kimi-k2-0711-preview",
+                "gemini-2.5-flash": "moonshot-v1-auto"
+            },
+            "default_openai_model": "kimi-k2-0711-preview"
+        }
+    ],
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "log_level": "info"
+    },
+    "logging": {
+        "enable_detailed_logs": false,
+        "enable_access_logs": true,
+        "log_directory": "logs"
+    },
+    "retry": {
+        "max_retries": 999,
+        "wait_fixed": 5
+    }
 }
 ```
 
@@ -180,10 +207,12 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `openai_api_key` | OpenAI API 密钥 | 必需 |
-| `openai_base_url` | OpenAI API 基础 URL | `https://api.openai.com/v1` |
-| `model_mapping` | Gemini 模型到 OpenAI 模型的映射 | `{}` |
-| `default_openai_model` | 默认 OpenAI 模型 | `gpt-3.5-turbo` |
+| `providers` | API 提供商配置列表。 | `[]` |
+| `providers[].name` | 提供商名称，用于启动时选择。 | `未命名提供商` |
+| `providers[].openai_api_key` | 提供商的 OpenAI API 密钥。 | 必需 |
+| `providers[].openai_base_url` | 提供商的 OpenAI API 基础 URL。 | `https://api.openai.com/v1` |
+| `providers[].model_mapping` | 提供商的 Gemini 模型到 OpenAI 模型的映射。 | `{}` |
+| `providers[].default_openai_model` | 提供商的默认 OpenAI 模型。 | `gpt-3.5-turbo` |
 | `server.host` | 监听地址 | `0.0.0.0` |
 | `server.port` | 监听端口 | `8000` |
 | `server.log_level` | 日志级别 | `info` |
