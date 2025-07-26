@@ -57,6 +57,7 @@ Create a `config.json` file, which now supports multiple providers:
             "name": "Moonshot",
             "openai_api_key": "sk-1234",
             "openai_base_url": "https://api.moonshot.cn/v1",
+            "daily_limit": -1,
             "model_mapping": {
                 "gemini-2.5-pro": "kimi-k2-0711-preview",
                 "gemini-2.5-flash": "moonshot-v1-auto"
@@ -67,6 +68,7 @@ Create a `config.json` file, which now supports multiple providers:
             "name": "OpenAI",
             "openai_api_key": "sk-5678",
             "openai_base_url": "https://api.openai.com/v1",
+            "daily_limit": -1,
             "model_mapping": {
                 "gemini-2.5-pro": "gpt-4o",
                 "gemini-2.5-flash": "gpt-4o-mini"
@@ -180,6 +182,7 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
             "name": "Moonshot",
             "openai_api_key": "sk-1234",
             "openai_base_url": "https://api.moonshot.cn/v1",
+            "daily_limit": -1,
             "model_mapping": {
                 "gemini-2.5-pro": "kimi-k2-0711-preview",
                 "gemini-2.5-flash": "moonshot-v1-auto"
@@ -212,6 +215,7 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 | `providers[].name` | The name of the provider, for selection at startup. | `Unnamed Provider` |
 | `providers[].openai_api_key` | OpenAI API key for the provider. | Required |
 | `providers[].openai_base_url` | OpenAI API base URL for the provider. | `https://api.openai.com/v1` |
+| `providers[].daily_limit` | Daily request limit for the provider. -1 means unlimited. | `-1` |
 | `providers[].model_mapping` | Gemini to OpenAI model mapping for the provider. | `{}` |
 | `providers[].default_openai_model` | Default OpenAI model for the provider. | `gpt-3.5-turbo` |
 | `server.host` | Listen address | `0.0.0.0` |
@@ -222,6 +226,16 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 | `logging.log_directory` | Log directory | `logs` |
 | `retry.max_retries` | Maximum number of retries on failure | `3` |
 | `retry.wait_fixed` | Fixed wait time between retries in seconds | `2` |
+
+### Provider Failover Logic
+
+The service includes an automatic failover mechanism based on the `daily_limit` of each provider to ensure high availability:
+
+1.  **Primary Provider**: The service will always try to use the provider you selected at startup first.
+2.  **Unlimited Failover**: If the primary provider reaches its daily limit, the service will automatically search for and switch to the first available provider with an unlimited quota (`"daily_limit": -1`).
+3.  **Limited Failover**: If no unlimited providers are available, the service will then search for and switch to the first available provider that still has a remaining request quota.
+4.  **Service Unavailable**: If all configured providers have reached their daily limits, the API will return a `503 Service Unavailable` error.
+
 
 ## 📊 Supported LLM Services
 

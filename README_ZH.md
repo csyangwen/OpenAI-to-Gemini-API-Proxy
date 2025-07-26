@@ -56,6 +56,7 @@ pip install -r requirements.txt
             "name": "Moonshot",
             "openai_api_key": "sk-1234",
             "openai_base_url": "https://api.moonshot.cn/v1",
+            "daily_limit": -1,
             "model_mapping": {
                 "gemini-2.5-pro": "kimi-k2-0711-preview",
                 "gemini-2.5-flash": "moonshot-v1-auto"
@@ -66,6 +67,7 @@ pip install -r requirements.txt
             "name": "OpenAI",
             "openai_api_key": "sk-5678",
             "openai_base_url": "https://api.openai.com/v1",
+            "daily_limit": -1,
             "model_mapping": {
                 "gemini-2.5-pro": "gpt-4o",
                 "gemini-2.5-flash": "gpt-4o-mini"
@@ -179,6 +181,7 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
             "name": "Moonshot",
             "openai_api_key": "sk-1234",
             "openai_base_url": "https://api.moonshot.cn/v1",
+            "daily_limit": -1,
             "model_mapping": {
                 "gemini-2.5-pro": "kimi-k2-0711-preview",
                 "gemini-2.5-flash": "moonshot-v1-auto"
@@ -211,6 +214,7 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 | `providers[].name` | 提供商名称，用于启动时选择。 | `未命名提供商` |
 | `providers[].openai_api_key` | 提供商的 OpenAI API 密钥。 | 必需 |
 | `providers[].openai_base_url` | 提供商的 OpenAI API 基础 URL。 | `https://api.openai.com/v1` |
+| `providers[].daily_limit` | 提供商的每日请求限制。-1 表示无限制。 | `-1` |
 | `providers[].model_mapping` | 提供商的 Gemini 模型到 OpenAI 模型的映射。 | `{}` |
 | `providers[].default_openai_model` | 提供商的默认 OpenAI 模型。 | `gpt-3.5-turbo` |
 | `server.host` | 监听地址 | `0.0.0.0` |
@@ -221,6 +225,15 @@ curl -X POST http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent 
 | `logging.log_directory` | 日志目录 | `logs` |
 | `retry.max_retries` | 失败时最大重试次数 | `3` |
 | `retry.wait_fixed` | 每次重试之间的固定等待时间（秒） | `2` |
+
+### 提供商故障切换逻辑
+
+服务内置了基于各提供商 `daily_limit` 的自动故障切换机制，以确保高可用性：
+
+1.  **首选提供商**：服务将始终优先使用您在启动时选择的提供商。
+2.  **无限额度切换**：如果首选提供商达到其每日限额，服务将自动寻找并切换到第一个可用的无限额度（`"daily_limit": -1`）的提供商。
+3.  **有限额度切换**：如果没有可用的无限额度提供商，服务将接着寻找并切换到第一个仍有剩余请求额度的提供商。
+4.  **服务不可用**：如果所有配置的提供商都已达到其每日限额，API 将返回 `503 Service Unavailable` 错误。
 
 ## 📊 支持的 LLM 服务
 

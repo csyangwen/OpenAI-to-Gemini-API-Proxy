@@ -16,7 +16,19 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 import uvicorn
+import pytz
 from tenacity import retry, wait_fixed, stop_after_attempt, retry_if_exception_type
+
+# --- 新增：使用状态管理 ---
+USAGE_STATS_FILE = os.path.join(os.path.dirname(__file__), "usage_stats.json")
+usage_stats = {
+    "date": "",
+    "providers": {}
+}
+all_providers = []
+active_provider = None
+# --------------------------
+
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +72,46 @@ def load_config():
     except json.JSONDecodeError as e:
         logger.error(f"配置文件格式错误: {e}")
         raise
+
+def load_usage_stats():
+    """加载使用情况统计"""
+    global usage_stats
+    if not os.path.exists(USAGE_STATS_FILE):
+        logger.info("使用情况统计文件不存在，将创建新文件。")
+        save_usage_stats()
+        return
+
+    try:
+        with open(USAGE_STATS_FILE, 'r', encoding='utf-8') as f:
+            usage_stats = json.load(f)
+        logger.info("使用情况统计加载成功。")
+    except (json.JSONDecodeError, FileNotFoundError):
+        logger.error("无法加载或解析使用情况文件，将使用默认值。")
+        usage_stats = {"date": "", "providers": {}}
+
+def save_usage_stats():
+    """保存使用情况统计"""
+    try:
+        with open(USAGE_STATS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(usage_stats, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"无法保存使用情况统计: {e}")
+
+def reset_daily_usage():
+    """检查并重置每日使用量（基于北京时间）"""
+    global usage_stats, all_providers
+    beijing_tz = pytz.timezone('Asia/Shanghai')
+    today_str = datetime.datetime.now(beijing_tz).strftime("%Y-%m-%d")
+
+    if usage_stats.get("date") != today_str:
+        logger.info(f"日期已更改，重置每日使用量。旧日期: {usage_stats.get('date')}, 新日期: {today_str}")
+        usage_stats["date"] = today_str
+        usage_stats["providers"] = {p.get("name"): 0 for p in all_providers}
+        save_usage_stats()
+    else:
+        logger.info("日期未更改，无需重置使用量。")
+
+# --------------------------
 
 # 初始化日志系统
 def init_logging_system(config):
@@ -120,20 +172,24 @@ WAIT_SECONDS = 2
 
 def update_global_config(provider_config, retry_config):
     """根据所选提供商更新全局配置"""
-    global OPENAI_API_KEY, OPENAI_BASE_URL, MODEL_MAPPING, DEFAULT_OPENAI_MODEL, MAX_RETRIES, WAIT_SECONDS
+    global OPENAI_API_KEY, OPENAI_BASE_URL, MODEL_MAPPING, DEFAULT_OPENAI_MODEL, MAX_RETRIES, WAIT_SECONDS, active_provider, proxy_service
 
-    OPENAI_API_KEY = provider_config.get("openai_api_key")
-    OPENAI_BASE_URL = provider_config.get("openai_base_url", "https://api.openai.com/v1")
-    MODEL_MAPPING = provider_config.get("model_mapping", {})
-    DEFAULT_OPENAI_MODEL = provider_config.get("default_openai_model", "gpt-3.5-turbo")
+    active_provider = provider_config
+    OPENAI_API_KEY = active_provider.get("openai_api_key")
+    OPENAI_BASE_URL = active_provider.get("openai_base_url", "https://api.openai.com/v1")
+    MODEL_MAPPING = active_provider.get("model_mapping", {})
+    DEFAULT_OPENAI_MODEL = active_provider.get("default_openai_model", "gpt-3.5-turbo")
 
     MAX_RETRIES = retry_config.get("max_retries", 3)
     WAIT_SECONDS = retry_config.get("wait_fixed", 2)
 
-    # 重新配置 Tenacity 重试装饰器
-    # 注意：这需要在服务启动前完成，因为装饰器在函数定义时就已经创建
-    # 因此，我们将重试逻辑的参数直接传递给 _retryable_create
-    pass
+    # 重新初始化服务以应用新配置
+    proxy_service = GeminiProxyService(
+        openai_api_key=OPENAI_API_KEY,
+        openai_base_url=OPENAI_BASE_URL,
+        provider_name=active_provider.get("name")
+    )
+    logger.info(f"全局配置已更新为提供商: {active_provider.get('name')}")
 
 
 def log_request_response(request_id: str, phase: str, data: Any, extra_info: str = "", endpoint: str = ""):
@@ -524,13 +580,23 @@ class OpenAIToGeminiConverter:
 class GeminiProxyService:
     """Gemini API 代理服务"""
     
-    def __init__(self, openai_api_key: str, openai_base_url: str = "https://api.openai.com/v1"):
+    def __init__(self, openai_api_key: str, openai_base_url: str = "https://api.openai.com/v1", provider_name: str = "Unknown"):
         self.client = AsyncOpenAI(
             api_key=openai_api_key,
             base_url=openai_base_url
         )
+        self.provider_name = provider_name
         self.converter_to_openai = GeminiToOpenAIConverter()
         self.converter_to_gemini = OpenAIToGeminiConverter()
+
+    def increment_usage(self):
+        """增加当前提供商的使用计数"""
+        if self.provider_name in usage_stats["providers"]:
+            usage_stats["providers"][self.provider_name] += 1
+        else:
+            usage_stats["providers"][self.provider_name] = 1
+        save_usage_stats()
+        logger.info(f"提供商 '{self.provider_name}' 的使用量已增加: {usage_stats['providers'][self.provider_name]}")
 
     async def _retryable_create(self, **kwargs):
         """可重试的创建请求"""
@@ -619,6 +685,9 @@ class GeminiProxyService:
             
             # 调用 OpenAI API
             response = await self._retryable_create(**completion_params)
+            
+            # 成功调用后增加计数
+            self.increment_usage()
             
             # 记录 OpenAI 原始响应
             log_request_response(
@@ -723,6 +792,9 @@ class GeminiProxyService:
             # 调用 OpenAI 流式 API
             stream = await self._retryable_create(**completion_params)
             
+            # 成功调用后增加计数（流式请求在开始时计数）
+            self.increment_usage()
+
             # 累积工具调用状态和响应内容
             accumulated_tool_calls = {}
             all_chunks = []  # 记录所有流式块
@@ -841,8 +913,48 @@ app = FastAPI(title="Gemini API Proxy", version="1.0.0")
 proxy_service = None
 
 
+async def get_active_provider() -> dict:
+    """获取当前可用的提供商，并根据需要进行故障切换"""
+    global active_provider, proxy_service
+
+    reset_daily_usage()  # 每次检查前都确保使用量是最新的
+
+    # Tier 1: 检查当前激活的提供商
+    current_provider_name = active_provider.get("name")
+    limit = active_provider.get("daily_limit", -1)
+    current_usage = usage_stats["providers"].get(current_provider_name, 0)
+
+    if limit == -1 or current_usage < limit:
+        logger.info(f"✅ 使用当前提供商: {current_provider_name}")
+        return active_provider
+
+    logger.warning(f"⚠️ 提供商 '{current_provider_name}' 已达限额 ({current_usage}/{limit})。正在尝试切换...")
+
+    # Tier 2: 寻找无限额度的提供商
+    for provider in all_providers:
+        if provider.get("daily_limit", -1) == -1:
+            logger.info(f"🔄 切换到无限额度提供商: {provider.get('name')}")
+            update_global_config(provider, config.get("retry", {}))
+            return active_provider
+
+    # Tier 3: 寻找还有剩余额度的提供商
+    for provider in all_providers:
+        provider_name = provider.get("name")
+        limit = provider.get("daily_limit", -1)
+        usage = usage_stats["providers"].get(provider_name, 0)
+        if limit != -1 and usage < limit:
+            logger.info(f"🔄 切换到有剩余额度的提供商: {provider_name}")
+            update_global_config(provider, config.get("retry", {}))
+            return active_provider
+
+    # Final: 如果都找不到，则服务不可用
+    logger.error("🚫 所有提供商均已达到限额，服务不可用。")
+    raise HTTPException(status_code=503, detail="All API providers have reached their daily limits.")
+
+
 async def get_proxy_service() -> GeminiProxyService:
-    """依赖注入，确保服务已初始化"""
+    """依赖注入，确保服务已初始化并使用正确的提供商"""
+    await get_active_provider()  # 确保在获取服务前已完成故障切换
     if proxy_service is None:
         raise HTTPException(status_code=503, detail="服务尚未初始化，请稍后重试")
     return proxy_service
@@ -984,42 +1096,48 @@ if __name__ == "__main__":
     init_logging_system(config)
     
     # 获取提供商列表
-    providers = config.get("providers", [])
-    if not providers:
+    all_providers = config.get("providers", [])
+    if not all_providers:
         logger.error("配置文件中未找到任何提供商 (providers)")
         exit(1)
 
+    # 初始化并检查每日使用量
+    load_usage_stats()
+    reset_daily_usage()
+
     # 让用户选择提供商
     print("请选择要使用的 API 提供商:")
-    for i, provider in enumerate(providers):
-        print(f"  {i + 1}: {provider.get('name', f'未命名提供商 {i+1}')}")
+    for i, provider in enumerate(all_providers):
+        provider_name = provider.get('name', f'未命名提供商 {i+1}')
+        limit = provider.get('daily_limit', -1)
+        usage = usage_stats["providers"].get(provider_name, 0)
+        
+        display_text = f"  {i + 1}: {provider_name}"
+        if limit != -1:
+            remaining = limit - usage
+            display_text += f" (剩余: {remaining})"
+        print(display_text)
     
     choice = -1
-    while choice < 1 or choice > len(providers):
+    while choice < 1 or choice > len(all_providers):
         try:
-            raw_choice = input(f"请输入选项 (1-{len(providers)}): ")
+            raw_choice = input(f"请输入选项 (1-{len(all_providers)}): ")
             choice = int(raw_choice)
-            if not (1 <= choice <= len(providers)):
+            if not (1 <= choice <= len(all_providers)):
                 print("无效选项，请重新输入。")
         except ValueError:
             print("无效输入，请输入数字。")
 
     # 获取所选提供商的配置
-    selected_provider = providers[choice - 1]
+    selected_provider_config = all_providers[choice - 1]
 
     # 获取通用配置
     server_config = config.get("server", {})
     logging_config = config.get("logging", {})
     retry_config = config.get("retry", {})
     
-    # 更新全局配置
-    update_global_config(selected_provider, retry_config)
-
-    # 初始化代理服务
-    proxy_service = GeminiProxyService(
-        openai_api_key=OPENAI_API_KEY,
-        openai_base_url=OPENAI_BASE_URL
-    )
+    # 更新全局配置并初始化服务
+    update_global_config(selected_provider_config, retry_config)
     
     # 获取服务器配置
     host = server_config.get("host", "0.0.0.0")
@@ -1027,7 +1145,7 @@ if __name__ == "__main__":
     log_level = server_config.get("log_level", "info")
 
     logger.info("="*50)
-    logger.info(f"✅ 已选择提供商: {selected_provider.get('name')}")
+    logger.info(f"✅ 初始选择提供商: {active_provider.get('name')}")
     logger.info(f"   - API Key: {OPENAI_API_KEY[:10] if OPENAI_API_KEY else 'None'}...")
     logger.info(f"   - Base URL: {OPENAI_BASE_URL}")
     logger.info(f"🔄 重试配置: 最大 {MAX_RETRIES} 次, 间隔 {WAIT_SECONDS} 秒")
